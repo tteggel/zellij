@@ -107,7 +107,7 @@ pub use super::generated_api::api::{
         SaveSessionResponse as ProtobufSaveSessionResponse, ScrollDownInPaneIdPayload,
         ScrollToBottomInPaneIdPayload, ScrollToTopInPaneIdPayload, ScrollUpInPaneIdPayload,
         SetFloatingPanePinnedPayload, SetPaneBorderlessPayload, SetPaneColorPayload,
-        SetPaneRegexHighlightsPayload, SetSelfMouseSelectionSupportPayload, SetTimeoutPayload,
+        SetPaneRegexHighlightsPayload, SetPaneShaderPayload, SetSelfMouseSelectionSupportPayload, SetTimeoutPayload,
         ShowCursorPayload, ShowFloatingPanesPayload as ProtobufShowFloatingPanesPayload,
         ShowFloatingPanesResponse as ProtobufShowFloatingPanesResponse, ShowPaneWithIdPayload,
         StackPanesPayload, SubscribePayload, SwitchSessionPayload, SwitchTabToIdPayload,
@@ -2543,6 +2543,16 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 },
                 _ => Err("Mismatched payload for ClearPaneHighlights"),
             },
+            Some(CommandName::SetPaneShader) => match protobuf_plugin_command.payload {
+                Some(Payload::SetPaneShaderPayload(payload)) => {
+                    let pane_id: PaneId = payload
+                        .pane_id
+                        .ok_or("Missing pane_id in SetPaneShader")?
+                        .try_into()?;
+                    Ok(PluginCommand::SetPaneShader(pane_id, payload.shader_wasm))
+                },
+                _ => Err("Mismatched payload for SetPaneShader"),
+            },
             None => Err("Unrecognized plugin command"),
         }
     }
@@ -4201,6 +4211,13 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                         pane_id: pane_id.try_into().ok(),
                     },
                 )),
+            }),
+            PluginCommand::SetPaneShader(pane_id, shader_wasm) => Ok(ProtobufPluginCommand {
+                name: CommandName::SetPaneShader as i32,
+                payload: Some(Payload::SetPaneShaderPayload(SetPaneShaderPayload {
+                    pane_id: pane_id.try_into().ok(),
+                    shader_wasm,
+                })),
             }),
         }
     }

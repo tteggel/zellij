@@ -201,6 +201,7 @@ enum CommandName {
   SetPaneColor = 206;
   SetPaneRegexHighlights = 207;
   ClearPaneHighlights = 208;
+  SetPaneShader = 209;
 }
 
 message PluginCommand {
@@ -351,6 +352,7 @@ message PluginCommand {
     SetPaneColorPayload set_pane_color_payload = 157;
     SetPaneRegexHighlightsPayload set_pane_regex_highlights_payload = 158;
     ClearPaneHighlightsPayload clear_pane_highlights_payload = 159;
+    SetPaneShaderPayload set_pane_shader_payload = 160;
   }
 }
 
@@ -1223,6 +1225,11 @@ message SetPaneColorPayload {
   PaneId pane_id = 1;
   optional string fg = 2;
   optional string bg = 3;
+}
+
+message SetPaneShaderPayload {
+  PaneId pane_id = 1;
+  optional bytes shader_wasm = 2;
 }
 
 message HighlightStyle {

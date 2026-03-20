@@ -327,6 +327,11 @@ pub trait Pane {
     fn get_pane_default_colors(&self) -> (Option<String>, Option<String>) {
         (None, None)
     }
+    fn set_pane_shader(&mut self, _shader_wasm: Option<Vec<u8>>) {}
+    fn has_shader_animation(&self) -> bool { false }
+    /// Tick the shader animation. Returns true if any rows were invalidated.
+    fn tick_shader_animation(&mut self) -> bool { false }
+    fn set_shader_context(&mut self, _ctx: crate::output::ShaderContext) {}
 
     fn right_boundary_x_coords(&self) -> usize {
         self.x() + self.cols()
@@ -2590,6 +2595,78 @@ impl Tab {
             pane.set_pane_default_colors(fg, bg);
         }
         Ok(())
+    }
+    pub fn set_pane_shader(
+        &mut self,
+        pane_id: PaneId,
+        shader_wasm: Option<Vec<u8>>,
+    ) -> Result<()> {
+        let pane = self
+            .floating_panes
+            .get_mut(&pane_id)
+            .or_else(|| self.tiled_panes.get_pane_mut(pane_id))
+            .or_else(|| self.suppressed_panes.get_mut(&pane_id).map(|p| &mut p.1));
+        if let Some(pane) = pane {
+            pane.set_pane_shader(shader_wasm);
+        }
+        Ok(())
+    }
+    /// Tick shader animations. Calls invalidate() on each shader pane
+    /// and marks only the returned rows dirty. Returns true if any
+    /// pane produced dirty rows (i.e., animation should continue).
+    pub fn tick_shader_animations(&mut self) -> bool {
+        let animated: Vec<PaneId> = self.tiled_panes
+            .get_panes()
+            .chain(self.floating_panes.get_panes())
+            .filter(|(_, pane)| pane.has_shader_animation())
+            .map(|(id, _)| *id)
+            .collect();
+        if animated.is_empty() {
+            return false;
+        }
+        let pane_count = self.tiled_panes.visible_panes_count() + self.floating_panes.visible_panes_count();
+        let display_area = self.display_area.borrow();
+        let (screen_w, screen_h) = (display_area.cols, display_area.rows);
+        drop(display_area);
+        let mut any_dirty = false;
+        for pid in animated {
+            let pane_id_num = match pid {
+                PaneId::Terminal(id) => id as i32,
+                PaneId::Plugin(id) => -(id as i32),
+            };
+            if let Some(pane) = self.tiled_panes.get_pane_mut(pid) {
+                let geom = pane.position_and_size();
+                let ctx = crate::output::ShaderContext {
+                    pane_id: pane_id_num,
+                    is_focused: false,
+                    pane_x: geom.x,
+                    pane_y: geom.y,
+                    screen_width: screen_w,
+                    screen_height: screen_h,
+                    pane_count,
+                };
+                pane.set_shader_context(ctx);
+                if pane.tick_shader_animation() {
+                    any_dirty = true;
+                }
+            } else if let Some(pane) = self.floating_panes.get_mut(&pid) {
+                let geom = pane.position_and_size();
+                let ctx = crate::output::ShaderContext {
+                    pane_id: pane_id_num,
+                    is_focused: false,
+                    pane_x: geom.x,
+                    pane_y: geom.y,
+                    screen_width: screen_w,
+                    screen_height: screen_h,
+                    pane_count,
+                };
+                pane.set_shader_context(ctx);
+                if pane.tick_shader_animation() {
+                    any_dirty = true;
+                }
+            }
+        }
+        any_dirty
     }
     pub fn has_pane_with_pid(&self, pid: &PaneId) -> bool {
         self.tiled_panes.panes_contain(pid)

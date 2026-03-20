@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use unicode_width::UnicodeWidthChar;
 use zellij_utils::data::{HighlightLayer, HighlightStyle, RegexHighlight, Style};
 use zellij_utils::errors::prelude::*;
@@ -534,6 +535,10 @@ pub struct Grid {
     // key: plugin_id (u32), inner vec: (pattern, compiled) pairs
     pub hover_position: Option<Position>, // pane-relative cursor cell; None when outside pane
     pub cached_hover_tooltip: Option<String>,
+    pub pane_shader: Option<Arc<crate::output::ShaderInstance>>,
+    pub prev_shader_cursor: Option<(usize, usize)>,
+    pub shader_context: crate::output::ShaderContext,
+    pub prev_shader_mouse: Option<(i32, i32)>,
 }
 
 impl Grid {
@@ -541,6 +546,26 @@ impl Grid {
         self.pane_default_fg = fg.as_ref().and_then(|s| xparse_color(s.as_bytes()));
         self.pane_default_bg = bg.as_ref().and_then(|s| xparse_color(s.as_bytes()));
         self.output_buffer.update_all_lines();
+    }
+    pub fn cursor_position(&self) -> (usize, usize) {
+        (self.cursor.x, self.cursor.y)
+    }
+    pub fn set_pane_shader(&mut self, shader_wasm: Option<Vec<u8>>) {
+        self.pane_shader = shader_wasm.and_then(|wasm_bytes| {
+            match crate::output::ShaderInstance::new(&wasm_bytes) {
+                Ok(instance) => {
+                    self.output_buffer.update_all_lines();
+                    Some(Arc::new(instance))
+                },
+                Err(e) => {
+                    log::error!("Failed to load pane shader: {}", e);
+                    None
+                },
+            }
+        });
+        if self.pane_shader.is_none() {
+            self.output_buffer.update_all_lines();
+        }
     }
     pub fn get_pane_default_color_strings(&self) -> (Option<String>, Option<String>) {
         (
@@ -817,6 +842,10 @@ impl Grid {
             plugin_highlights: HashMap::new(),
             hover_position: None,
             cached_hover_tooltip: None,
+            pane_shader: None,
+            prev_shader_cursor: None,
+            shader_context: Default::default(),
+            prev_shader_mouse: None,
         }
     }
     pub fn render_full_viewport(&mut self) {
@@ -1401,6 +1430,52 @@ impl Grid {
         for character_chunk in character_chunks.iter_mut() {
             character_chunk.add_changed_colors(self.changed_colors);
             character_chunk.add_pane_defaults(self.pane_default_fg, self.pane_default_bg);
+            let (mouse_x, mouse_y) = self.hover_position
+                .map(|p| (p.column() as i32, p.line() as i32))
+                .unwrap_or((-1, -1));
+            let (prev_mx, prev_my) = self.prev_shader_mouse.unwrap_or((-1, -1));
+            let (prev_cx, prev_cy) = self.prev_shader_cursor
+                .map(|(x, y)| (x as i32, y as i32))
+                .unwrap_or((self.cursor.x as i32, self.cursor.y as i32));
+            let (scroll_pos, _scroll_len) = self.scrollback_position_and_length();
+            let (has_sel, sel_sx, sel_sy, sel_ex, sel_ey) = if self.selection.is_empty() {
+                (0, 0, 0, 0, 0)
+            } else {
+                let s = self.selection.sorted();
+                (1, s.start.column() as i32, s.start.line() as i32, s.end.column() as i32, s.end.line() as i32)
+            };
+            let time_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis() as i32;
+            let uniforms = crate::output::ShaderUniforms {
+                pane_width: self.width as i32,
+                pane_height: self.height as i32,
+                cursor_x: self.cursor.x as i32,
+                cursor_y: self.cursor.y as i32,
+                mouse_x,
+                mouse_y,
+                time_ms,
+                pane_id: self.shader_context.pane_id,
+                is_focused: self.shader_context.is_focused as i32,
+                scroll_offset: scroll_pos as i32,
+                pane_x: self.shader_context.pane_x as i32,
+                pane_y: self.shader_context.pane_y as i32,
+                screen_width: self.shader_context.screen_width as i32,
+                screen_height: self.shader_context.screen_height as i32,
+                pane_count: self.shader_context.pane_count as i32,
+                has_selection: has_sel,
+                sel_start_x: sel_sx,
+                sel_start_y: sel_sy,
+                sel_end_x: sel_ex,
+                sel_end_y: sel_ey,
+                prev_cursor_x: prev_cx,
+                prev_cursor_y: prev_cy,
+                prev_mouse_x: prev_mx,
+                prev_mouse_y: prev_my,
+                _reserved: [0; 8],
+            };
+            character_chunk.add_pane_shader(self.pane_shader.clone(), uniforms);
             if self
                 .selection
                 .contains_row(character_chunk.y.saturating_sub(content_y))

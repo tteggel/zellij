@@ -324,6 +324,79 @@ impl Pane for TerminalPane {
     fn get_pane_default_colors(&self) -> (Option<String>, Option<String>) {
         self.grid.get_pane_default_color_strings()
     }
+    fn set_pane_shader(&mut self, shader_wasm: Option<Vec<u8>>) {
+        self.grid.set_pane_shader(shader_wasm);
+        self.set_should_render(true);
+    }
+    fn has_shader_animation(&self) -> bool {
+        self.grid.pane_shader.as_ref().map_or(false, |s| s.has_animation())
+    }
+    fn set_shader_context(&mut self, ctx: crate::output::ShaderContext) {
+        self.grid.shader_context = ctx;
+    }
+    fn tick_shader_animation(&mut self) -> bool {
+        let shader = match self.grid.pane_shader {
+            Some(ref s) if s.has_animation() => s,
+            _ => return false,
+        };
+        let t_ms = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_millis() as i32;
+        let (mouse_x, mouse_y) = self.grid.hover_position
+            .map(|p| (p.column() as i32, p.line() as i32))
+            .unwrap_or((-1, -1));
+        let (cx, cy) = self.grid.cursor_position();
+        let (prev_cx, prev_cy) = self.grid.prev_shader_cursor
+            .map(|(x, y)| (x as i32, y as i32))
+            .unwrap_or((cx as i32, cy as i32));
+        let (prev_mx, prev_my) = self.grid.prev_shader_mouse.unwrap_or((-1, -1));
+        let (scroll_pos, _) = self.grid.scrollback_position_and_length();
+        let (has_sel, sel_sx, sel_sy, sel_ex, sel_ey) = if self.grid.selection.is_empty() {
+            (0, 0, 0, 0, 0)
+        } else {
+            let s = self.grid.selection.sorted();
+            (1, s.start.column() as i32, s.start.line() as i32, s.end.column() as i32, s.end.line() as i32)
+        };
+        let uniforms = crate::output::ShaderUniforms {
+            pane_width: self.grid.width as i32,
+            pane_height: self.grid.height as i32,
+            cursor_x: cx as i32,
+            cursor_y: cy as i32,
+            mouse_x,
+            mouse_y,
+            time_ms: t_ms,
+            pane_id: self.grid.shader_context.pane_id,
+            is_focused: self.grid.shader_context.is_focused as i32,
+            scroll_offset: scroll_pos as i32,
+            pane_x: self.grid.shader_context.pane_x as i32,
+            pane_y: self.grid.shader_context.pane_y as i32,
+            screen_width: self.grid.shader_context.screen_width as i32,
+            screen_height: self.grid.shader_context.screen_height as i32,
+            pane_count: self.grid.shader_context.pane_count as i32,
+            has_selection: has_sel,
+            sel_start_x: sel_sx,
+            sel_start_y: sel_sy,
+            sel_end_x: sel_ex,
+            sel_end_y: sel_ey,
+            prev_cursor_x: prev_cx,
+            prev_cursor_y: prev_cy,
+            prev_mouse_x: prev_mx,
+            prev_mouse_y: prev_my,
+            _reserved: [0; 8],
+        };
+        let dirty_rows = shader.invalidate(&uniforms);
+        self.grid.prev_shader_cursor = Some((cx, cy));
+        self.grid.prev_shader_mouse = Some((mouse_x, mouse_y));
+        if dirty_rows.is_empty() {
+            return false;
+        }
+        for row in &dirty_rows {
+            self.grid.output_buffer.update_line(*row);
+        }
+        self.set_should_render(true);
+        true
+    }
     fn render(
         &mut self,
         _client_id: Option<ClientId>,

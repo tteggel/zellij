@@ -618,6 +618,11 @@ pub enum ScreenInstruction {
         Option<String>,
         Option<NotificationEnd>,
     ),
+    SetPaneShader(
+        PaneId,
+        Option<Vec<u8>>,
+        Option<NotificationEnd>,
+    ),
     WriteKeyToPaneId(
         Option<KeyWithModifier>,
         Vec<u8>,
@@ -903,6 +908,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::WriteToPaneId(..) => ScreenContext::WriteToPaneId,
             ScreenInstruction::Paste(..) => ScreenContext::Paste,
             ScreenInstruction::SetPaneColor(..) => ScreenContext::SetPaneColor,
+            ScreenInstruction::SetPaneShader(..) => ScreenContext::SetPaneShader,
             ScreenInstruction::WriteKeyToPaneId(..) => ScreenContext::WriteKeyToPaneId,
             ScreenInstruction::CopyTextToClipboard(..) => ScreenContext::CopyTextToClipboard,
             ScreenInstruction::MovePaneWithPaneId(..) => ScreenContext::MovePaneWithPaneId,
@@ -4731,6 +4737,16 @@ pub(crate) fn screen_thread_main(
                 // that a 100ms timeout has been reached (more info in the RenderBlocker comment)
                 if screen.render_blocker.can_render() {
                     screen.render_to_clients()?;
+                    // Animation tick: if any shader panes need re-render, schedule another frame
+                    let mut has_animation = false;
+                    for tab in screen.get_tabs_mut().values_mut() {
+                        if tab.tick_shader_animations() {
+                            has_animation = true;
+                        }
+                    }
+                    if has_animation {
+                        screen.render(None)?;
+                    }
                 } else {
                     screen.render(None)?;
                 }
@@ -7539,6 +7555,26 @@ pub(crate) fn screen_thread_main(
                     if tab.has_pane_with_pid(&pane_id) {
                         tab.set_pane_color(pane_id, fg, bg).non_fatal();
                         break;
+                    }
+                }
+                screen.render(None)?;
+            },
+            ScreenInstruction::SetPaneShader(pane_id, shader_wasm, _completion) => {
+                let has_shader = shader_wasm.is_some();
+                let all_tabs = screen.get_tabs_mut();
+                for tab in all_tabs.values_mut() {
+                    if tab.has_pane_with_pid(&pane_id) {
+                        tab.set_pane_shader(pane_id, shader_wasm).non_fatal();
+                        break;
+                    }
+                }
+                if has_shader {
+                    // Mark all lines dirty for shader panes to enable animation.
+                    // The render debounce (RenderToClients) will continuously
+                    // re-render shader panes with updated time values.
+                    let all_tabs = screen.get_tabs_mut();
+                    for tab in all_tabs.values_mut() {
+                        tab.tick_shader_animations();
                     }
                 }
                 screen.render(None)?;
