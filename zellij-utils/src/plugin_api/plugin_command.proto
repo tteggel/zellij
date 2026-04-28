@@ -223,6 +223,7 @@ enum CommandName {
   ApplyFloatingSwapLayout = 230;
   SetPaneBorderStyle = 231;
   GetNestedSessionKeybinds = 232;
+  SetPaneShader = 233;
 }
 
 message PluginCommand {
@@ -387,6 +388,7 @@ message PluginCommand {
     string apply_floating_swap_layout_payload = 173;
     SetPaneBorderStylePayload set_pane_border_style_payload = 174;
     GetNestedSessionKeybindsPayload get_nested_session_keybinds_payload = 175;
+    SetPaneShaderPayload set_pane_shader_payload = 176;
   }
 }
 
@@ -1297,6 +1299,11 @@ message SetPaneColorPayload {
   PaneId pane_id = 1;
   optional string fg = 2;
   optional string bg = 3;
+}
+
+message SetPaneShaderPayload {
+  PaneId pane_id = 1;
+  optional bytes shader_wasm = 2;
 }
 
 message HighlightStyle {

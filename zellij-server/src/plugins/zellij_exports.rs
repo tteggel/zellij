@@ -657,6 +657,9 @@ fn host_run_plugin_command(mut caller: Caller<'_, PluginEnv>) {
                     PluginCommand::SetPaneColor(pane_id, fg, bg) => {
                         set_pane_color(env, pane_id.into(), fg, bg)
                     },
+                    PluginCommand::SetPaneShader(pane_id, shader_wasm) => {
+                        set_pane_shader(env, pane_id.into(), shader_wasm)
+                    },
                     PluginCommand::OpenFileNearPlugin(file_to_open, context) => {
                         open_file_near_plugin(env, file_to_open, context)
                     },
@@ -4080,6 +4083,12 @@ fn set_pane_color(env: &PluginEnv, pane_id: PaneId, fg: Option<String>, bg: Opti
         .send_to_screen(ScreenInstruction::SetPaneColor(pane_id, fg, bg, None));
 }
 
+fn set_pane_shader(env: &PluginEnv, pane_id: PaneId, shader_wasm: Option<Vec<u8>>) {
+    let _ = env
+        .senders
+        .send_to_screen(ScreenInstruction::SetPaneShader(pane_id, shader_wasm, None));
+}
+
 fn scan_host_folder(env: &PluginEnv, folder_to_scan: PathBuf) {
     if !folder_to_scan.starts_with("/host") {
         log::error!(
@@ -5688,6 +5697,7 @@ fn check_command_permission(
         | PluginCommand::SetPaneBorderless(..)
         | PluginCommand::SetPaneBorderStyle(..)
         | PluginCommand::SetPaneColor(..)
+        | PluginCommand::SetPaneShader(..)
         | PluginCommand::GroupAndUngroupPanes(..)
         | PluginCommand::HighlightAndUnhighlightPanes(..)
         | PluginCommand::CloseMultiplePanes(..)
