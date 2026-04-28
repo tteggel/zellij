@@ -83,6 +83,104 @@ fn adjust_styles_for_possible_selection(
         .unwrap_or(character_styles)
 }
 
+fn ansi_to_rgb(code: AnsiCode) -> Option<(u8, u8, u8)> {
+    match code {
+        AnsiCode::RgbCode(rgb) => Some(rgb),
+        AnsiCode::NamedColor(n) => {
+            Some(match n {
+                crate::panes::terminal_character::NamedColor::Black => (0, 0, 0),
+                crate::panes::terminal_character::NamedColor::Red => (205, 0, 0),
+                crate::panes::terminal_character::NamedColor::Green => (0, 205, 0),
+                crate::panes::terminal_character::NamedColor::Yellow => (205, 205, 0),
+                crate::panes::terminal_character::NamedColor::Blue => (0, 0, 238),
+                crate::panes::terminal_character::NamedColor::Magenta => (205, 0, 205),
+                crate::panes::terminal_character::NamedColor::Cyan => (0, 205, 205),
+                crate::panes::terminal_character::NamedColor::White => (229, 229, 229),
+                crate::panes::terminal_character::NamedColor::BrightBlack => (127, 127, 127),
+                crate::panes::terminal_character::NamedColor::BrightRed => (255, 0, 0),
+                crate::panes::terminal_character::NamedColor::BrightGreen => (0, 255, 0),
+                crate::panes::terminal_character::NamedColor::BrightYellow => (255, 255, 0),
+                crate::panes::terminal_character::NamedColor::BrightBlue => (92, 92, 255),
+                crate::panes::terminal_character::NamedColor::BrightMagenta => (255, 0, 255),
+                crate::panes::terminal_character::NamedColor::BrightCyan => (0, 255, 255),
+                crate::panes::terminal_character::NamedColor::BrightWhite => (255, 255, 255),
+            })
+        },
+        AnsiCode::ColorIndex(idx) => {
+            if idx < 16 {
+                let named = match idx {
+                    0 => crate::panes::terminal_character::NamedColor::Black,
+                    1 => crate::panes::terminal_character::NamedColor::Red,
+                    2 => crate::panes::terminal_character::NamedColor::Green,
+                    3 => crate::panes::terminal_character::NamedColor::Yellow,
+                    4 => crate::panes::terminal_character::NamedColor::Blue,
+                    5 => crate::panes::terminal_character::NamedColor::Magenta,
+                    6 => crate::panes::terminal_character::NamedColor::Cyan,
+                    7 => crate::panes::terminal_character::NamedColor::White,
+                    8 => crate::panes::terminal_character::NamedColor::BrightBlack,
+                    9 => crate::panes::terminal_character::NamedColor::BrightRed,
+                    10 => crate::panes::terminal_character::NamedColor::BrightGreen,
+                    11 => crate::panes::terminal_character::NamedColor::BrightYellow,
+                    12 => crate::panes::terminal_character::NamedColor::BrightBlue,
+                    13 => crate::panes::terminal_character::NamedColor::BrightMagenta,
+                    14 => crate::panes::terminal_character::NamedColor::BrightCyan,
+                    _ => crate::panes::terminal_character::NamedColor::BrightWhite,
+                };
+                ansi_to_rgb(AnsiCode::NamedColor(named))
+            } else if idx < 232 {
+                let idx = idx - 16;
+                let r = (idx / 36) * 51;
+                let g = ((idx % 36) / 6) * 51;
+                let b = (idx % 6) * 51;
+                Some((r, g, b))
+            } else {
+                let v = 8 + (idx - 232) * 10;
+                Some((v, v, v))
+            }
+        },
+        _ => None,
+    }
+}
+
+fn apply_shader_to_styles(
+    styles: CharacterStyles,
+    shader: &ShaderInstance,
+    x: usize,
+    y: usize,
+    uniforms: &ShaderUniforms,
+    default_fg: (u8, u8, u8),
+    default_bg: (u8, u8, u8),
+) -> CharacterStyles {
+    let mut colors: Vec<(u8, u8, u8, usize, usize, bool)> = Vec::with_capacity(2);
+    // Foreground
+    let fg_rgb = match styles.foreground {
+        Some(AnsiCode::Reset) | None => default_fg,
+        Some(c) => ansi_to_rgb(c).unwrap_or(default_fg),
+    };
+    colors.push((fg_rgb.0, fg_rgb.1, fg_rgb.2, x, y, true));
+    // Background
+    let bg_rgb = match styles.background {
+        Some(AnsiCode::Reset) | None => default_bg,
+        Some(c) => ansi_to_rgb(c).unwrap_or(default_bg),
+    };
+    colors.push((bg_rgb.0, bg_rgb.1, bg_rgb.2, x, y, false));
+
+    if let Some(results) = shader.shade_batch(&colors, uniforms) {
+        let mut styles = styles;
+        if results.len() >= 1 {
+            let (nr, ng, nb) = results[0];
+            styles.foreground = Some(AnsiCode::RgbCode((nr, ng, nb)));
+        }
+        if results.len() >= 2 {
+            let (nr, ng, nb) = results[1];
+            styles.background = Some(AnsiCode::RgbCode((nr, ng, nb)));
+        }
+        styles
+    } else {
+        styles
+    }
+}
+
 fn adjust_styles_for_custom_bg_fg(
     character_styles: CharacterStyles,
     pane_default_fg: Option<AnsiCode>,
@@ -169,7 +267,7 @@ fn serialize_chunks_with_newlines(
                 }
             }
 
-            let current_character_styles = adjust_styles_for_custom_bg_fg(
+            let mut current_character_styles = adjust_styles_for_custom_bg_fg(
                 adjust_styles_for_possible_selection(
                     character_chunk.selection_and_colors(),
                     *t_character.styles,
@@ -179,6 +277,19 @@ fn serialize_chunks_with_newlines(
                 pane_default_fg,
                 pane_default_bg,
             );
+            if let Some(ref shader) = character_chunk.pane_shader {
+                let dfg = pane_default_fg.and_then(ansi_to_rgb).unwrap_or((229, 229, 229));
+                let dbg = pane_default_bg.and_then(ansi_to_rgb).unwrap_or((0, 0, 0));
+                current_character_styles = apply_shader_to_styles(
+                    current_character_styles,
+                    shader,
+                    chunk_width,
+                    character_chunk.y,
+                    &character_chunk.shader_uniforms,
+                    dfg,
+                    dbg,
+                );
+            }
             write_changed_styles(
                 &mut character_styles,
                 current_character_styles,
@@ -234,7 +345,7 @@ fn serialize_chunks(
                 }
             }
 
-            let current_character_styles = adjust_styles_for_custom_bg_fg(
+            let mut current_character_styles = adjust_styles_for_custom_bg_fg(
                 adjust_styles_for_possible_selection(
                     character_chunk.selection_and_colors(),
                     *t_character.styles,
@@ -244,6 +355,19 @@ fn serialize_chunks(
                 pane_default_fg,
                 pane_default_bg,
             );
+            if let Some(ref shader) = character_chunk.pane_shader {
+                let dfg = pane_default_fg.and_then(ansi_to_rgb).unwrap_or((229, 229, 229));
+                let dbg = pane_default_bg.and_then(ansi_to_rgb).unwrap_or((0, 0, 0));
+                current_character_styles = apply_shader_to_styles(
+                    current_character_styles,
+                    shader,
+                    chunk_width,
+                    character_chunk.y,
+                    &character_chunk.shader_uniforms,
+                    dfg,
+                    dbg,
+                );
+            }
             write_changed_styles(
                 &mut character_styles,
                 current_character_styles,
@@ -1020,6 +1144,8 @@ pub struct CharacterChunk {
     pub pane_default_fg: Option<AnsiCode>,
     pub pane_default_bg: Option<AnsiCode>,
     selection_and_colors: Vec<HighlightSelection>,
+    pub pane_shader: Option<std::sync::Arc<ShaderInstance>>,
+    pub shader_uniforms: ShaderUniforms,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -1062,6 +1188,10 @@ impl CharacterChunk {
     pub fn add_pane_defaults(&mut self, fg: Option<AnsiCode>, bg: Option<AnsiCode>) {
         self.pane_default_fg = fg;
         self.pane_default_bg = bg;
+    }
+    pub fn add_pane_shader(&mut self, shader: Option<std::sync::Arc<ShaderInstance>>, uniforms: ShaderUniforms) {
+        self.pane_shader = shader;
+        self.shader_uniforms = uniforms;
     }
     pub fn changed_colors(&self) -> Option<[Option<AnsiCode>; 256]> {
         self.changed_colors
@@ -1324,3 +1454,122 @@ impl OutputBuffer {
 
 #[cfg(test)]
 mod unit;
+
+/// A compiled WASM shader instance ready for batch color transformation.
+impl std::fmt::Debug for ShaderInstance {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ShaderInstance").finish_non_exhaustive()
+    }
+}
+
+// Static-only shader uniforms. The host writes 128 bytes at offset 65408
+// of WASM memory before each shade_batch call; the shader reads what it
+// needs. Only pane width/height are populated; the rest is reserved
+// padding so the on-wire layout stays a fixed 128 bytes.
+#[repr(C)]
+#[derive(Clone, Copy, Default, Debug)]
+pub struct ShaderUniforms {
+    pub pane_width: i32,
+    pub pane_height: i32,
+    pub _reserved: [i32; 30],
+}
+
+pub struct ShaderInstance {
+    engine: wasmi::Engine,
+    store: std::sync::Mutex<wasmi::Store<()>>,
+    instance: wasmi::Instance,
+    memory: wasmi::Memory,
+    shade_batch: wasmi::TypedFunc<(i32, i32), ()>,
+}
+
+impl ShaderInstance {
+    pub fn new(wasm_bytes: &[u8]) -> Result<Self, String> {
+        let engine = wasmi::Engine::default();
+        let module = wasmi::Module::new(&engine, wasm_bytes)
+            .map_err(|e| format!("Failed to compile shader WASM: {}", e))?;
+        let mut store = wasmi::Store::new(&engine, ());
+        let linker = wasmi::Linker::new(&engine);
+        let instance = linker
+            .instantiate_and_start(&mut store, &module)
+            .map_err(|e| format!("Failed to instantiate shader: {}", e))?;
+        let memory = instance
+            .get_memory(&store, "memory")
+            .ok_or_else(|| "Shader has no memory export".to_string())?;
+        let shade_batch = instance
+            .get_typed_func::<(i32, i32), ()>(&store, "shade_batch")
+            .map_err(|e| format!("Missing shade_batch export: {}", e))?;
+        Ok(Self {
+            engine,
+            store: std::sync::Mutex::new(store),
+            instance,
+            memory,
+            shade_batch,
+        })
+    }
+
+    // Write uniforms at offset 65408 to avoid clobbering WASM stack/static data
+    // at low addresses. 128 bytes (65408..65536).
+    const UNIFORMS_OFFSET: usize = 65408;
+
+    fn write_uniforms(&self, store: &mut wasmi::Store<()>, uniforms: &ShaderUniforms) {
+        let bytes: &[u8] = unsafe {
+            core::slice::from_raw_parts(
+                uniforms as *const ShaderUniforms as *const u8,
+                128,
+            )
+        };
+        let needed = Self::UNIFORMS_OFFSET + 128;
+        let current_size = self.memory.data_size(&*store);
+        if current_size < needed {
+            let pages = ((needed - current_size + 65535) / 65536) as u32;
+            let _ = self.memory.grow(&mut *store, pages.into());
+        }
+        let mem = self.memory.data_mut(&mut *store);
+        mem[Self::UNIFORMS_OFFSET..Self::UNIFORMS_OFFSET + 128].copy_from_slice(bytes);
+    }
+
+    pub fn shade_batch(
+        &self,
+        colors: &[(u8, u8, u8, usize, usize, bool)],
+        uniforms: &ShaderUniforms,
+    ) -> Option<Vec<(u8, u8, u8)>> {
+        let mut store = self.store.lock().ok()?;
+        let count = colors.len();
+        // Each entry: 6 x i32 = 24 bytes. Use offset 1024 to avoid stack.
+        let data_offset: usize = 1024;
+        let needed = data_offset + count * 24;
+        // Grow memory if needed
+        let current_size = self.memory.data_size(&*store);
+        if needed > current_size {
+            let pages_needed = ((needed - current_size + 65535) / 65536) as u32;
+            self.memory.grow(&mut *store, pages_needed.into()).ok()?;
+        }
+        // Write uniforms to WASM memory
+        self.write_uniforms(&mut *store, uniforms);
+        // Write color data to WASM memory
+        let mem_data = self.memory.data_mut(&mut *store);
+        for (i, &(r, g, b, x, y, is_fg)) in colors.iter().enumerate() {
+            let base = data_offset + i * 24;
+            mem_data[base..base+4].copy_from_slice(&(r as i32).to_le_bytes());
+            mem_data[base+4..base+8].copy_from_slice(&(g as i32).to_le_bytes());
+            mem_data[base+8..base+12].copy_from_slice(&(b as i32).to_le_bytes());
+            mem_data[base+12..base+16].copy_from_slice(&(x as i32).to_le_bytes());
+            mem_data[base+16..base+20].copy_from_slice(&(y as i32).to_le_bytes());
+            mem_data[base+20..base+24].copy_from_slice(&(if is_fg { 1i32 } else { 0i32 }).to_le_bytes());
+        }
+        // Call shade_batch
+        self.shade_batch.call(&mut *store, (data_offset as i32, count as i32)).ok()?;
+        // Read back results
+        let mem_data = self.memory.data(&*store);
+        let mut results = Vec::with_capacity(count);
+        for i in 0..count {
+            let base = data_offset + i * 24;
+            let r = i32::from_le_bytes(mem_data[base..base+4].try_into().ok()?) as u8;
+            let g = i32::from_le_bytes(mem_data[base+4..base+8].try_into().ok()?) as u8;
+            let b = i32::from_le_bytes(mem_data[base+8..base+12].try_into().ok()?) as u8;
+            results.push((r, g, b));
+        }
+        Some(results)
+    }
+
+}

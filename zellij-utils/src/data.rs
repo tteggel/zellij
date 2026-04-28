@@ -3645,6 +3645,7 @@ pub enum PluginCommand {
     },
     SetShadowFocus(PaneId),
     ExitMobileMode,
+    SetPaneShader(PaneId, Option<Vec<u8>>), // (pane_id, wasm_bytes_or_none)
 }
 
 // Response type for plugin API methods that open a pane in a new tab

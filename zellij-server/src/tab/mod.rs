@@ -378,6 +378,7 @@ pub trait Pane {
     fn get_pane_default_colors(&self) -> (Option<String>, Option<String>) {
         (None, None)
     }
+    fn set_pane_shader(&mut self, _shader_wasm: Option<Vec<u8>>) {}
 
     fn right_boundary_x_coords(&self) -> usize {
         self.x() + self.cols()
@@ -3734,6 +3735,21 @@ impl Tab {
             .or_else(|| self.suppressed_panes.get_mut(&pane_id).map(|p| &mut p.1));
         if let Some(pane) = pane {
             pane.set_pane_default_colors(fg, bg);
+        }
+        Ok(())
+    }
+    pub fn set_pane_shader(
+        &mut self,
+        pane_id: PaneId,
+        shader_wasm: Option<Vec<u8>>,
+    ) -> Result<()> {
+        let pane = self
+            .floating_panes
+            .get_mut(&pane_id)
+            .or_else(|| self.tiled_panes.get_pane_mut(pane_id))
+            .or_else(|| self.suppressed_panes.get_mut(&pane_id).map(|p| &mut p.1));
+        if let Some(pane) = pane {
+            pane.set_pane_shader(shader_wasm);
         }
         Ok(())
     }

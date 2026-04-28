@@ -218,6 +218,7 @@ enum CommandName {
   SetPaneFrameStyle = 224;
   ToggleFloatingPanes = 225;
   NewPane = 226;
+  SetPaneShader = 227;
 }
 
 message PluginCommand {
@@ -379,6 +380,7 @@ message PluginCommand {
     NewTiledPaneInTabPayload new_tiled_pane_in_tab_payload = 169;
     SetPaneFrameStylePayload set_pane_frame_style_payload = 170;
     ToggleFloatingPanesPayload toggle_floating_panes_payload = 171;
+    SetPaneShaderPayload set_pane_shader_payload = 172;
   }
 }
 
@@ -1279,6 +1281,11 @@ message SetPaneColorPayload {
   PaneId pane_id = 1;
   optional string fg = 2;
   optional string bg = 3;
+}
+
+message SetPaneShaderPayload {
+  PaneId pane_id = 1;
+  optional bytes shader_wasm = 2;
 }
 
 message HighlightStyle {

@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::collections::HashMap;
 use std::rc::Rc;
+use std::sync::Arc;
 use unicode_width::UnicodeWidthChar;
 use zellij_utils::data::{
     HighlightLayer, HighlightStyle, HostTerminalThemeMode, RegexHighlight, Style,
@@ -676,6 +677,7 @@ pub struct Grid {
     // key: plugin_id (u32), inner vec: (pattern, compiled) pairs
     pub hover_position: Option<Position>, // pane-relative cursor cell; None when outside pane
     pub cached_hover_tooltip: Option<String>,
+    pub pane_shader: Option<Arc<crate::output::ShaderInstance>>,
 }
 
 impl Grid {
@@ -692,6 +694,23 @@ impl Grid {
             .and_then(|s| xparse_color(s.as_bytes()))
             .and_then(rgb_of_ansi_code);
         self.output_buffer.update_all_lines();
+    }
+    pub fn set_pane_shader(&mut self, shader_wasm: Option<Vec<u8>>) {
+        self.pane_shader = shader_wasm.and_then(|wasm_bytes| {
+            match crate::output::ShaderInstance::new(&wasm_bytes) {
+                Ok(instance) => {
+                    self.output_buffer.update_all_lines();
+                    Some(Arc::new(instance))
+                },
+                Err(e) => {
+                    log::error!("Failed to load pane shader: {}", e);
+                    None
+                },
+            }
+        });
+        if self.pane_shader.is_none() {
+            self.output_buffer.update_all_lines();
+        }
     }
     pub fn get_pane_default_color_strings(&self) -> (Option<String>, Option<String>) {
         (
@@ -987,6 +1006,7 @@ impl Grid {
             plugin_highlights: HashMap::new(),
             hover_position: None,
             cached_hover_tooltip: None,
+            pane_shader: None,
         }
     }
     pub fn render_full_viewport(&mut self) {
@@ -1579,6 +1599,12 @@ impl Grid {
                 self.pane_default_fg.map(AnsiCode::RgbCode),
                 self.pane_default_bg.map(AnsiCode::RgbCode),
             );
+            let uniforms = crate::output::ShaderUniforms {
+                pane_width: self.width as i32,
+                pane_height: self.height as i32,
+                _reserved: [0; 30],
+            };
+            character_chunk.add_pane_shader(self.pane_shader.clone(), uniforms);
             if self
                 .selection
                 .contains_row(character_chunk.y.saturating_sub(content_y))
