@@ -123,7 +123,7 @@ pub use super::generated_api::api::{
         SessionListSnapshot as ProtobufSessionListSnapshot, SetFloatingPanePinnedPayload,
         SetPaneBorderlessPayload, SetPaneColorPayload,
         SetPaneFrameStylePayload as ProtobufSetPaneFrameStylePayload,
-        SetPaneRegexHighlightsPayload, SetSelfMouseSelectionSupportPayload,
+        SetPaneRegexHighlightsPayload, SetPaneShaderPayload, SetSelfMouseSelectionSupportPayload,
         SetSoftKeyboardPayload as ProtobufSetSoftKeyboardPayload, SetTimeoutPayload,
         ShowCursorPayload, ShowFloatingPanesPayload as ProtobufShowFloatingPanesPayload,
         ShowFloatingPanesResponse as ProtobufShowFloatingPanesResponse, ShowPaneWithIdPayload,
@@ -2794,6 +2794,16 @@ impl TryFrom<ProtobufPluginCommand> for PluginCommand {
                 },
                 _ => Err("Mismatched payload for OpenPluginPaneFloating"),
             },
+            Some(CommandName::SetPaneShader) => match protobuf_plugin_command.payload {
+                Some(Payload::SetPaneShaderPayload(payload)) => {
+                    let pane_id: PaneId = payload
+                        .pane_id
+                        .ok_or("Missing pane_id in SetPaneShader")?
+                        .try_into()?;
+                    Ok(PluginCommand::SetPaneShader(pane_id, payload.shader_wasm))
+                },
+                _ => Err("Mismatched payload for SetPaneShader"),
+            },
             None => Err("Unrecognized plugin command"),
         }
     }
@@ -4555,6 +4565,13 @@ impl TryFrom<PluginCommand> for ProtobufPluginCommand {
                     )),
                 })
             },
+            PluginCommand::SetPaneShader(pane_id, shader_wasm) => Ok(ProtobufPluginCommand {
+                name: CommandName::SetPaneShader as i32,
+                payload: Some(Payload::SetPaneShaderPayload(SetPaneShaderPayload {
+                    pane_id: pane_id.try_into().ok(),
+                    shader_wasm,
+                })),
+            }),
         }
     }
 }

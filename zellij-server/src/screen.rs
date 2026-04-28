@@ -840,6 +840,11 @@ pub enum ScreenInstruction {
         Option<String>,
         Option<NotificationEnd>,
     ),
+    SetPaneShader(
+        PaneId,
+        Option<Vec<u8>>,
+        Option<NotificationEnd>,
+    ),
     WriteKeyToPaneId(
         Option<KeyWithModifier>,
         Vec<u8>,
@@ -1221,6 +1226,7 @@ impl From<&ScreenInstruction> for ScreenContext {
             ScreenInstruction::WriteToPaneId(..) => ScreenContext::WriteToPaneId,
             ScreenInstruction::Paste(..) => ScreenContext::Paste,
             ScreenInstruction::SetPaneColor(..) => ScreenContext::SetPaneColor,
+            ScreenInstruction::SetPaneShader(..) => ScreenContext::SetPaneShader,
             ScreenInstruction::WriteKeyToPaneId(..) => ScreenContext::WriteKeyToPaneId,
             ScreenInstruction::CopyTextToClipboard(..) => ScreenContext::CopyTextToClipboard,
             ScreenInstruction::MovePaneWithPaneId(..) => ScreenContext::MovePaneWithPaneId,
@@ -11690,6 +11696,16 @@ pub(crate) fn screen_thread_main(
                 for tab in all_tabs.values_mut() {
                     if tab.has_pane_with_pid(&pane_id) {
                         tab.set_pane_color(pane_id, fg, bg).non_fatal();
+                        break;
+                    }
+                }
+                screen.render(None)?;
+            },
+            ScreenInstruction::SetPaneShader(pane_id, shader_wasm, _completion) => {
+                let all_tabs = screen.get_tabs_mut();
+                for tab in all_tabs.values_mut() {
+                    if tab.has_pane_with_pid(&pane_id) {
+                        tab.set_pane_shader(pane_id, shader_wasm).non_fatal();
                         break;
                     }
                 }
