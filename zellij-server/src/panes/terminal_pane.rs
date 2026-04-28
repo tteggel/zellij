@@ -485,6 +485,10 @@ impl Pane for TerminalPane {
     fn get_pane_default_colors(&self) -> (Option<String>, Option<String>) {
         self.grid.get_pane_default_color_strings()
     }
+    fn set_pane_shader(&mut self, shader_wasm: Option<Vec<u8>>) {
+        self.grid.set_pane_shader(shader_wasm);
+        self.set_should_render(true);
+    }
     fn render(
         &mut self,
         _client_id: Option<ClientId>,
